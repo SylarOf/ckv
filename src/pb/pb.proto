@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+message TableIndex{
+    repeated BlockOffset offsets = 1;
+    bytes bloom_filter = 2;
+    uint32 key_count = 3;
+}
+
+message BlockOffset{
+    bytes key = 1;
+    uint32 offset = 2;
+    uint32 len = 3;
+} 
+
+// use ManifestChangeSet to encapsulation to serialize changes together
+message ManifestChangeSet{
+    // a set of changes that are applied atomically
+    repeated ManifestChange changes = 1;
+}
+
+message ManifestChange{
+    uint64 id = 1;
+    enum Operation{
+        CREATE = 0;
+        DELETE = 1;
+    }
+    Operation op = 2;
+    uint32 level = 3;
+    bytes checksum = 4;
+}
+
+
