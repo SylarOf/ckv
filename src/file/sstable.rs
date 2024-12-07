@@ -54,15 +54,16 @@ impl SSTable {
     }
 
     // binary serach key in block
-    pub fn seek(&self, key: &Slice) -> Option<u32> {
+    pub fn seek(&self, key: &[u8]) -> Option<u32> {
         let found = self
             .indexs()
             .offsets
-            .binary_search_by(|offset| offset.key.cmp(key));
+            .binary_search_by(|offset| offset.key.cmp(&Vec::from(key)));
         match found {
             Ok(idx) => Some(idx as u32),
             Err(idx) => {
-                if idx > 1 {
+
+                if idx >= 1 {
                     Some((idx - 1) as u32)
                 } else {
                     None
@@ -85,7 +86,7 @@ impl SSTable {
         let data = &self.f;
 
         //debug
-        println!("{:?}", &data[..]);
+        //println!("{:?}", &data[..]);
         // read checksum len from the last 4 bytes
         let buf = &data[read_pos - 4..read_pos];
         read_pos -= 4;

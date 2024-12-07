@@ -73,7 +73,7 @@ impl<'a> TableIterator<'a> {
         }
     }
 
-    pub fn seek(&mut self, key: &Slice) -> Option<Slice> {
+    pub fn seek(&mut self, key: &[u8]) -> Option<Slice> {
         let block_idx = self.table.sstable.seek(key)?;
         self.set_block(block_idx)?;
         self.bi.seek(key)
@@ -89,6 +89,8 @@ impl<'a> TableIterator<'a> {
         let base_key = offsets.key;
 
         self.bi = BlockIterator::new(data, &base_key);
+        self.bi.init().unwrap();
+        
         self.block_pos = idx;
         Some(())
     }
@@ -119,6 +121,7 @@ mod tests {
         let mut iter = table.new_iterator();
         iter.seek_to_first();
 
+        let value = iter.seek("abc".as_bytes());
         println!(
             "key : {}, value : {}",
             test_helper::display(iter.key()).unwrap(),
@@ -132,5 +135,14 @@ mod tests {
                 test_helper::display(iter.val()).unwrap()
             );
         }
+        let value = iter.seek("abj".as_bytes());
+        println!("{}", test_helper::display(&value.unwrap()).unwrap());
+        println!(
+            "key : {}, value : {}",
+            test_helper::display(iter.key()).unwrap(),
+            test_helper::display(iter.val()).unwrap()
+        );
+
+
     }
 }

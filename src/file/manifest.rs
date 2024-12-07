@@ -1,14 +1,16 @@
+use crate::db::options::Options;
 use crate::file::file;
 use crate::pb::pb;
 use prost::Message;
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
-use std::io::{Write,Read};
-use std::sync::Mutex;
+use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
 
 pub struct ManifestFile {
     f: Mutex<File>,
     manifest: Manifest,
+    opt: Arc<Options>,
 }
 
 struct Manifest {
@@ -28,8 +30,8 @@ struct TableManifest {
 }
 
 impl ManifestFile {
-    pub fn open(opt: file::Options) -> std::io::Result<ManifestFile> {
-        let manifest_path = std::path::Path::new(&opt.dir).join(file::MANIFSET_NAME);
+    pub fn open(opt: Arc<Options>) -> std::io::Result<ManifestFile> {
+        let manifest_path = std::path::Path::new(&opt.work_dir).join(file::MANIFSET_NAME);
         let res = File::open(manifest_path);
         let mut file;
         let num;
@@ -37,7 +39,7 @@ impl ManifestFile {
             match e.kind() {
                 std::io::ErrorKind::NotFound => {
                     let m = Manifest::new();
-                    let (f, n) = Self::help_rwrite(&opt.dir, &m)?;
+                    let (f, n) = Self::help_rwrite(&opt.work_dir, &m)?;
                     file = f;
                     num = n;
                 }
@@ -49,16 +51,16 @@ impl ManifestFile {
                     return Err(e);
                 }
             }
-        }
-        else {
+        } else {
             file = res.unwrap();
         }
 
         // if open, replay the manifest
         let manifest = Manifest::with_file(&mut file).unwrap();
-        Ok(ManifestFile{
+        Ok(ManifestFile {
             f: Mutex::new(file),
             manifest,
+            opt,
         })
     }
 
@@ -75,6 +77,24 @@ impl ManifestFile {
 
         v.append(&mut buf);
         manifest_file.write_all(&v).unwrap();
+        Ok(())
+    }
+
+    pub fn revert(&self, set: HashSet<u64>) -> Result<(), String> {
+        // set : file exists
+        for (fid, _) in &self.manifest.tables {
+            if set.contains(&fid) == false {
+                return Err(format!("file does not exist for table {}", fid));
+            }
+        }
+        for fid in set {
+            if self.manifest.tables.contains_key(&fid) == false {
+                let filename = file::file_sstable_name(&self.opt.work_dir, fid);
+                if let Err(e) = std::fs::remove_file(filename) {
+                    return Err(format!("remove file error, {}", e));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -134,24 +154,26 @@ impl Manifest {
     }
 
     // replay_with_file apply all the changes in existed manifest file
-    pub fn with_file(file: &mut File) -> Result<Manifest,String >{
-        let mut magic_buf = [0u8;8];
-        file.read_exact(&mut magic_buf).unwrap();  
-        if &magic_buf[0..4] != file::MAGIC_TEXT || &magic_buf[4..8] != file::MAGIC_VERSION.to_le_bytes(){
-            return Err("magic not equal".to_string()); 
+    pub fn with_file(file: &mut File) -> Result<Manifest, String> {
+        let mut magic_buf = [0u8; 8];
+        file.read_exact(&mut magic_buf).unwrap();
+        if &magic_buf[0..4] != file::MAGIC_TEXT
+            || &magic_buf[4..8] != file::MAGIC_VERSION.to_le_bytes()
+        {
+            return Err("magic not equal".to_string());
         };
 
         let mut manifest = Manifest::new();
-        let mut crc_buf = [0u8;8];
+        let mut crc_buf = [0u8; 8];
         file.read_exact(&mut crc_buf).unwrap();
-        
-        let  data_len = u32::from_le_bytes(crc_buf[0..4].try_into().unwrap());
+
+        let data_len = u32::from_le_bytes(crc_buf[0..4].try_into().unwrap());
         let crc = &crc_buf[4..8];
 
-        let mut data_buf = vec![0u8;data_len as usize];
+        let mut data_buf = vec![0u8; data_len as usize];
         file.read_exact(&mut data_buf);
 
-        if crate::utils::file::verify_checksum(&data_buf, crc) == false{
+        if crate::utils::file::verify_checksum(&data_buf, crc) == false {
             return Err("checksum not equal".to_string());
         }
         let change_set = pb::ManifestChangeSet::decode(&data_buf[..]).unwrap();

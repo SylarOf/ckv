@@ -310,7 +310,6 @@ impl <'a>BlockIterator<'a> {
         } 
     } 
     pub fn seek_to_first(&mut self){
-        self.init().unwrap();
         self.set_idx(0);
     }
     pub fn seek_to_last(&mut self){
@@ -325,12 +324,19 @@ impl <'a>BlockIterator<'a> {
         Some(())
     }
     // todo! to ref but not to clone entry_offsets
-    pub fn seek(&mut self, key : &Slice)->Option<Slice>{
-        let arr = self.entry_offsets.clone(); 
-        let found_idx = arr.binary_search_by(|&i|{
+    pub fn seek(&mut self, key : &[u8])->Option<Slice>{
+        let key_len = self.entry_offsets.len();
+        let mut seek_arr = Vec::new();
+        for i in 0..key_len{
+            seek_arr.push(i);
+        }
+        let found_idx = seek_arr.binary_search_by(|&i|{
+            println!("i is {}", i);
             self.set_idx(i as i32);
-            self.key.cmp(key)
+            self.key.cmp(&Vec::from(key))
         });
+
+
         if let Ok(i) = found_idx{
             self.set_idx(i as i32);
             Some(self.key.clone())
@@ -350,7 +356,7 @@ impl <'a>BlockIterator<'a> {
     pub fn val(&self) ->&Slice{
         &self.val
     }
-    fn init(&mut self)->Result<(), String>{
+    pub fn init(&mut self)->Result<(), String>{
         let data = self.data;
         let mut read_pos = data.len();
 
