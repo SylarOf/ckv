@@ -13,3 +13,49 @@ pub fn verify_checksum(data: &[u8], checksum: &[u8]) -> bool {
     calculate_checksum(data).to_le_bytes() == checksum
 }
 
+pub mod file_helper {
+
+    use std::collections::HashSet;
+
+    // use id to get sst file name
+    pub fn file_sstable_name(dir: &str, id: u64) -> String {
+        let file_name = format!("{:05}.sst", id);
+        std::path::Path::new(&dir)
+            .join(&file_name)
+            .to_str()
+            .unwrap()
+            .to_string()
+    }
+    // use sst file name to get its fid
+    pub fn fid(name: &str) -> Result<u64, String> {
+        if !name.ends_with(".sst") {
+            return Err("not a sst  file".to_string());
+        }
+
+        // remove the ".sst" suffix
+        let name = name.trim_end_matches(".sst");
+
+        match name.parse::<u64>() {
+            Ok(id) => Ok(id),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    // load all sst file id in a dir
+    pub fn load_id_set(dir: &str) -> std::io::Result<HashSet<u64>> {
+        let mut set = HashSet::new();
+
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                continue;
+            }
+
+            let id = fid(entry.file_name().to_str().unwrap());
+            if let Ok(id) = id {
+                set.insert(id);
+            }
+        }
+        Ok(set)
+    }
+}

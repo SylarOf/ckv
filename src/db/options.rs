@@ -1,15 +1,15 @@
 #[derive(Default)]
 pub struct Options {
     pub work_dir: String,
-    pub memtable_size: i64,
+    pub memtable_size: u64,
     pub sstable_maxsz: u64,
-    pub block_size: i64,
+    pub block_size: u64,
     pub bloom_false_positive: f64,
 
     pub num_compactors: u32,
-    pub base_level_size: i64,
+    pub base_level_size: u64,
     pub level_size_multiplier: u32, // between level size expect ratio
-    pub base_table_size: i64,
+    pub base_table_size: u64,
     pub table_size_multiplier: u32,
     pub num_level_zero_tables: u32,
     pub max_level_num: u32,

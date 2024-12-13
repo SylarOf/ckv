@@ -4,6 +4,7 @@ use crate::file::sstable::SSTable;
 use crate::table::table_builder::{BlockIterator, TableBuilder};
 use crate::utils::slice::Slice;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 pub struct Table {
     sstable: SSTable,
@@ -39,6 +40,22 @@ impl Table {
             block_pos: 0,
             bi: BlockIterator::default(),
         }
+    }
+
+    pub fn id(&self) -> Result<u64, String> {
+        self.sstable.id()
+    }
+    pub fn size(&self) -> u64 {
+        self.sstable.size()
+    }
+    pub fn min_key(&self) -> &Slice {
+        self.sstable.min_key()
+    }
+    pub fn max_key(&self) -> &Slice {
+        self.sstable.max_key()
+    }
+    pub fn create_at(&self) -> SystemTime {
+        self.sstable.get_create_at()
     }
 }
 
@@ -90,7 +107,7 @@ impl<'a> TableIterator<'a> {
 
         self.bi = BlockIterator::new(data, &base_key);
         self.bi.init().unwrap();
-        
+
         self.block_pos = idx;
         Some(())
     }
@@ -142,7 +159,5 @@ mod tests {
             test_helper::display(iter.key()).unwrap(),
             test_helper::display(iter.val()).unwrap()
         );
-
-
     }
 }

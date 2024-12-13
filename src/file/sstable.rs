@@ -1,11 +1,13 @@
 use super::file::Options;
 use crate::pb::*;
+use crate::utils::file::file_helper;
 use crate::utils::slice::Slice;
 use memmap2::MmapMut;
 use prost::Message;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::sync::{Arc, RwLock};
+use std::time::SystemTime;
 
 pub struct SSTable {
     name: String,
@@ -14,6 +16,7 @@ pub struct SSTable {
     min_key: Slice,
     has_filter: bool,
     table_index: pb::TableIndex,
+    created_at: SystemTime,
 }
 
 impl SSTable {
@@ -24,9 +27,10 @@ impl SSTable {
             .read(true)
             .open(std::path::Path::new(&opt.dir).join(opt.file_name.clone()))?;
 
-        if opt.create{
+        if opt.create {
             file.set_len(opt.size).unwrap();
         }
+        let metadata = file.metadata()?;
         Ok(SSTable {
             name: opt.file_name,
             f: unsafe { MmapMut::map_mut(&file)? },
@@ -34,6 +38,7 @@ impl SSTable {
             min_key: Slice::new(),
             has_filter: true,
             table_index: pb::TableIndex::default(),
+            created_at: SystemTime::now(),
         })
     }
 
@@ -62,7 +67,6 @@ impl SSTable {
         match found {
             Ok(idx) => Some(idx as u32),
             Err(idx) => {
-
                 if idx >= 1 {
                     Some((idx - 1) as u32)
                 } else {
@@ -76,9 +80,39 @@ impl SSTable {
         self.max_key = max_key;
     }
     pub fn write_table(&mut self, data: &[u8]) {
-
         let len = self.f.len();
         self.f[0..len].copy_from_slice(data);
+    }
+
+    pub fn id(&self) -> Result<u64, String> {
+        file_helper::fid(&self.name)
+    }
+    pub fn indexs(&self) -> &pb::TableIndex {
+        &self.table_index
+    }
+
+    pub fn max_key(&self) -> &Slice {
+        &self.max_key
+    }
+
+    pub fn min_key(&self) -> &Slice {
+        &self.min_key
+    }
+
+    pub fn has_bloom_filter(&self) -> bool {
+        self.has_filter
+    }
+
+    pub fn size(&self) -> u64 {
+        self.f.len() as u64
+    }
+
+    pub fn delete(&mut self) -> io::Result<()> {
+        std::fs::remove_file(self.name.clone())
+    }
+
+    pub fn get_create_at(&self) -> SystemTime {
+        self.created_at
     }
 
     fn init_table(&mut self) -> Result<pb::BlockOffset, String> {
@@ -116,28 +150,5 @@ impl SSTable {
             return Ok(self.table_index.offsets[0].clone());
         }
         return Err("read index failed, offset is empty".to_string());
-    }
-
-    fn indexs(&self) -> &pb::TableIndex {
-        &self.table_index
-    }
-
-    fn max_key(&self) -> &Slice {
-        &self.max_key
-    }
-
-    fn min_key(&self) -> &Slice {
-        &self.min_key
-    }
-
-    fn has_bloom_filter(&self) -> bool {
-        self.has_filter
-    }
-
-    fn size(&self) -> u64 {
-        self.f.len() as u64
-    }
-    fn delete(&mut self) -> io::Result<()> {
-        std::fs::remove_file(self.name.clone())
     }
 }

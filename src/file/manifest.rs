@@ -1,6 +1,7 @@
 use crate::db::options::Options;
 use crate::file::file;
 use crate::pb::pb;
+use crate::utils::file::file_helper::file_sstable_name;
 use prost::Message;
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
@@ -13,20 +14,20 @@ pub struct ManifestFile {
     opt: Arc<Options>,
 }
 
-struct Manifest {
-    levels: Vec<LevelManifest>,
-    tables: HashMap<u64, TableManifest>,
-    creations: u32,
-    deletions: u32,
+pub struct Manifest {
+    pub levels: Vec<LevelManifest>,
+    pub tables: HashMap<u64, TableManifest>,
+    pub creations: u32,
+    pub deletions: u32,
 }
 
 // levelManifest storage tables per level
 type LevelManifest = HashSet<u64>;
 
 // use TableManifest to get level of table with table id
-struct TableManifest {
-    level: u8,
-    checksum: Vec<u8>,
+pub struct TableManifest {
+    pub level: u8,
+    pub checksum: Vec<u8>,
 }
 
 impl ManifestFile {
@@ -89,13 +90,16 @@ impl ManifestFile {
         }
         for fid in set {
             if self.manifest.tables.contains_key(&fid) == false {
-                let filename = file::file_sstable_name(&self.opt.work_dir, fid);
+                let filename = file_sstable_name(&self.opt.work_dir, fid);
                 if let Err(e) = std::fs::remove_file(filename) {
                     return Err(format!("remove file error, {}", e));
                 }
             }
         }
         Ok(())
+    }
+    pub fn get_manifest(&self) -> &Manifest {
+        &self.manifest
     }
 
     fn help_rwrite(dir: &String, m: &Manifest) -> std::io::Result<(File, u32)> {
