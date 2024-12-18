@@ -1,4 +1,5 @@
 use super::level::*;
+use super::iterator::*;
 use crate::table::table::Table;
 use crate::utils::slice::Slice;
 use std::cmp::Ordering;
@@ -23,11 +24,12 @@ struct Targets {
 struct CompactDef {
     compact_id: u32,
     t: Targets,
-    p: CompactionPriority,
     this_level: u32,
+    p: CompactionPriority,
     next_level: u32,
     this_sz: u64,
     tables: Vec<u64>,
+    splits: Vec<KeyRange>,
 
     top: Vec<u32>,
     bot: Vec<u32>,
@@ -217,7 +219,7 @@ impl LevelManager {
         Ok(())
     }
 
-    fn fill_tables_l0_to_base(&mut self, cd: &mut CompactDef) -> Result<(), String> {
+    fn fill_tables_l0_to_base(&self, cd: &mut CompactDef) -> Result<(), String> {
         if cd.next_level == 0 {
             return Err("base level cannot be zero".to_string());
         }
@@ -265,6 +267,146 @@ impl LevelManager {
         self.compact_state.write().unwrap().compare_and_add(&cd)
     }
 
+    fn fill_tables(&self, cd: &mut CompactDef) -> Result<(), String> {
+        let tables = &self.levels[cd.this_level as usize].read().unwrap().tables;
+        if tables.len() == 0 {
+            return Err("this level is empty".to_string());
+        }
+
+        for (i, table) in tables.iter().enumerate() {
+            cd.this_sz = table.size();
+            cd.this_range = KeyRange::with_table(table);
+            // do nothing if has been compressing
+            {
+                if self.compact_state_overlap_with(cd.this_level as usize, &cd.this_range) == true {
+                    continue;
+                }
+            }
+            if let Ok((left, right)) =
+                self.get_level_overlapping_tables(cd.next_level as usize, &cd.this_range)
+            {
+                let v: Vec<u32> = (left..=right).map(|i| i as u32).collect();
+                let bot = &self.levels[cd.next_level as usize].read().unwrap().tables;
+                let bot: Vec<&Table> = v.iter().map(|&i| &bot[i as usize]).collect();
+
+                cd.bot = v;
+                cd.next_range = KeyRange::with_tables(&bot);
+                for table in bot {
+                    cd.this_sz += table.size();
+                    cd.tables.push(table.id().unwrap());
+                }
+                if let Ok(()) = self.compact_state.write().unwrap().compare_and_add(&cd) {
+                    return Ok(());
+                } else {
+                    continue;
+                }
+            }
+        }
+
+        Err("no overlap".to_string())
+    }
+
+    // fill_tables_l0 first try L0 to L_base compressing, if failed
+    // compressing L0 to L0.
+    fn fill_tables_l0(&self, cd: &mut CompactDef) -> Result<(), String> {
+        if let Ok(()) = self.fill_tables_l0_to_base(cd) {
+            Ok(())
+        } else {
+            self.fill_tables_l0_to_l0(cd)
+        }
+    }
+
+    // parallel execution of sub-compression scenarios
+    fn add_splits(&self, cd: &mut CompactDef) {
+        // Let's say we have 10 tables in cd.bot and min width = 3. Then, we'll pick
+        // 0, 1, 2 (pick), 3, 4, 5 (pick), 6, 7, 8 (pick), 9 (pick, because last table).
+        // This gives us 4 picks for 10 tables.
+        // In an edge case, 142 tables in bottom led to 48 splits. That's too many splits, because it
+        // then uses up a lot of memory for table builder.
+        // We should keep it so we have at max 5 splits.
+        let mut width = (cd.bot.len() as f64 / 5.0).ceil() as u32;
+        if width < 3 {
+            width = 3;
+        }
+        let mut skr = cd.this_range.clone();
+        skr.extend(cd.next_range.clone());
+
+        let mut add_range = |right: &Slice| {
+            skr.right = right.clone();
+            cd.splits.push(skr.clone());
+            skr.left = skr.right.clone();
+        };
+
+        let tables = &self.levels[cd.next_level as usize].read().unwrap().tables;
+        for (idx, table) in tables.iter().enumerate() {
+            // last entry in bottom table
+            if idx == tables.len() - 1 {
+                add_range(table.max_key());
+                return;
+            }
+            if idx as u32 % width == width - 1 {
+                // set max key is right interval
+                add_range(table.max_key())
+            }
+        }
+    }
+
+    fn do_compact(&self, id: u32, p: CompactionPriority) -> Result<(), String> {
+        let l = p.level;
+        let base_level = p.t.base_level;
+        // crate real compressing plan
+        let mut cd = CompactDef {
+            compact_id: id,
+            t: p.t.clone(),
+            this_level: p.level,
+            p,
+            next_level: 0,
+            this_sz: 0,
+            tables: Vec::new(),
+            splits: Vec::new(),
+            top: Vec::new(),
+            bot: Vec::new(),
+            this_range: KeyRange::new(),
+            next_range: KeyRange::new(),
+        };
+
+        if l == 0 {
+            cd.next_level = base_level;
+            self.fill_tables_l0(&mut cd)?;
+        } else {
+            cd.next_level = cd.this_level;
+
+            if cd.this_level != self.levels.len() as u32 {
+                cd.next_level = cd.this_level + 1;
+                self.fill_tables(&mut cd)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn run_compact_def(&self, id: u32, cd: &CompactDef) -> Result<(), String> {
+        Ok(())
+    }
+
+    // compact_build_tables merge two level ssts
+    fn compact_build_tables<'a>(&self, cd : &CompactDef){
+        let top_tables = &self.levels[cd.this_level as usize].read().unwrap().tables;
+        let bot_tables = &self.levels[cd.next_level as usize].read().unwrap().tables;
+
+        let mut v : Vec<Box<dyn DBIterator>>= Vec::new(); 
+        for &i in &cd.top{
+            v.push(Box::new(top_tables[i as usize].new_iterator()));
+        }
+        for &i in &cd.bot{
+            v.push(Box::new(bot_tables[i as usize].new_iterator()));
+        }
+
+        let merge_iter = MergeIterator::new(v);
+    }
+
+
+
     // returns the tables that intersect with key range
     fn get_level_overlapping_tables(
         &self,
@@ -292,6 +434,11 @@ impl LevelManager {
 
     fn get_compact_delsize(&self, idx: usize) -> u64 {
         self.compact_state.read().unwrap().levels[idx].del_sz
+    }
+
+    fn compact_state_overlap_with(&self, idx: usize, kr: &KeyRange) -> bool {
+        let cs = self.compact_state.write().unwrap();
+        cs.levels[idx].overlap_with(kr)
     }
 }
 

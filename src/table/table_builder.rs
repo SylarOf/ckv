@@ -312,19 +312,21 @@ impl <'a>BlockIterator<'a> {
     pub fn seek_to_first(&mut self){
         self.set_idx(0);
     }
+    
     pub fn seek_to_last(&mut self){
-        self.set_idx(self.entry_offsets.len() as i32 -1);
+        self.set_idx(self.entry_offsets.len() as i32 - 1);
     }
+
     pub fn next(&mut self)->Option<()>{
-        let idx = self.idx+1;
-        if idx <0 || idx >= self.entry_offsets.len() as i32{
-            return None
+        let idx = self.idx +1;
+        if idx < 0 || idx >= self.entry_offsets.len() as i32{
+            return None;
         }
         self.set_idx(self.idx+1);
         Some(())
     }
     // todo! to ref but not to clone entry_offsets
-    pub fn seek(&mut self, key : &[u8])->Option<Slice>{
+    pub fn seek(&mut self, key : &[u8])->Option<&Slice>{
         let key_len = self.entry_offsets.len();
         let mut seek_arr = Vec::new();
         for i in 0..key_len{
@@ -339,7 +341,7 @@ impl <'a>BlockIterator<'a> {
 
         if let Ok(i) = found_idx{
             self.set_idx(i as i32);
-            Some(self.key.clone())
+            Some(&self.key)
         } 
         else{
             None

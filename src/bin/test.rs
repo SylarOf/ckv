@@ -1,59 +1,43 @@
-use rand::Rng;
+use tokio::sync::mpsc;
+use tokio::time::{sleep, Duration};
 
-fn rand_str(length: usize) -> String {
-    let str = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ~=+%^*/()[]{}/!@#$?|©®😁😭🉑️🐂㎡硬核课堂";
-    let chars: Vec<char> = str.chars().collect(); // Convert to a Vec<char> for direct UTF-8 handling
+#[tokio::main]
+async fn main() {
+    // Create a channel with a buffer size of 2
+    let (tx, mut rx) = mpsc::channel(2);
 
-    let mut rng = rand::thread_rng(); // No need to manually seed
-
-    let mut result = String::with_capacity(length);
-    for _ in 0..length {
-        let random_index = rng.gen_range(0..chars.len());
-        result.push(chars[random_index]);
+    // Spawn 4 senders (simulating them sending messages)
+    for i in 0..4 {
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            // Simulate work before sending a message
+            sleep(Duration::from_millis(100)).await;
+            tx.send(i).await.unwrap(); // Send the message
+            println!("Sender {} sent message", i);
+        });
     }
+    drop(tx);
+    // Create a new task to handle receiving messages
+    let receive_task = tokio::spawn(async move {
+        let mut received = vec![];
+        let mut counter = 0;
 
-    result
-}
-fn generate_incredible_strings(num: usize) -> Vec<String> {
-    // Define the alphabet
-    let alphabet = "abcdefghijklmnopqrstuvwxyz";
-    
-    // Starting string is "abc"
-    let mut current_chars = vec!['a', 'b', 'c'];
+        // Receive messages in a separate task
+        while let Some(msg) = rx.recv().await {
+            println!("Received message: {}", msg);
+            received.push(msg);
+            counter += 1;
 
-    let mut result_vec = Vec::new(); // Vec to hold the generated strings
-
-    for _ in 0..num {
-        // Generate the current string
-        let mut result = String::new();
-        for &ch in &current_chars {
-            result.push(ch);
+  
         }
-        result_vec.push(result); // Add the string to the result vector
 
-        // Increment the last character, handling overflow
-        let mut carry = true;
-        for i in (0..current_chars.len()).rev() {
-            if carry {
-                if current_chars[i] == 'z' {
-                    current_chars[i] = 'a'; // Reset to 'a' if 'z' is reached
-                } else {
-                    current_chars[i] = (current_chars[i] as u8 + 1) as char; // Increment character
-                    carry = false; // Stop carry over
-                }
-            }
-        }
-    }
+        // Optionally return the received messages to the main thread
+        received
+    });
 
-    result_vec // Return the vector of generated strings
-}
+    // Wait for the receive task to finish and get the result
+    let received_messages = receive_task.await.unwrap();
 
-fn main() {
-    let num_strings = 1000; //Example: Generate 10 strings
-    let strings = generate_incredible_strings(num_strings);
-
-    // Print all the generated strings
-    for s in strings {
-        println!("{}", s);
-    }
+    // Print all the received messages
+    println!("All received messages: {:?}", received_messages);
 }

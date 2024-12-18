@@ -1,3 +1,4 @@
+use crate::db::iterator::DBIterator;
 use crate::db::options::Options;
 use crate::file::file;
 use crate::file::sstable::SSTable;
@@ -90,7 +91,7 @@ impl<'a> TableIterator<'a> {
         }
     }
 
-    pub fn seek(&mut self, key: &[u8]) -> Option<Slice> {
+    pub fn seek(&mut self, key: &[u8]) -> Option<&Slice> {
         let block_idx = self.table.sstable.seek(key)?;
         self.set_block(block_idx)?;
         self.bi.seek(key)
@@ -113,6 +114,27 @@ impl<'a> TableIterator<'a> {
     }
 }
 
+impl<'a> DBIterator for TableIterator<'a> {
+    fn seek_to_first(&mut self) {
+        self.seek_to_first();
+    }
+
+    fn seek(&mut self, key: &Slice) -> Option<&Slice> {
+        self.seek(key)
+    }
+
+    fn next(&mut self) -> Option<()> {
+        self.next()
+    }
+
+    fn key(&self) -> &Slice {
+        self.key()
+    }
+
+    fn val(&self) -> &Slice {
+        self.val()
+    }
+}
 mod tests {
     use super::*;
     use crate::utils::test_helper;
