@@ -202,6 +202,9 @@ impl TableBuilder {
         Ok(ss)
     }
 
+    pub fn reach_capacity(&self) ->bool{
+        self.estimate_size as u64 > self.opt.sstable_maxsz
+    }
 
     // note: can't move a part under &mut 
     fn done(&mut self) ->BuildData{
@@ -262,6 +265,8 @@ impl TableBuilder {
             offset : start_offset,
         }
     }
+
+    
 
 }
 

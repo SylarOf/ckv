@@ -1,12 +1,22 @@
-use super::level::*;
 use super::iterator::*;
+use super::level::*;
+use super::options::Options;
+use crate::file::manifest::*;
+use crate::pb::pb::{ManifestChange, ManifestChangeSet};
 use crate::table::table::Table;
+use crate::table::table_builder::TableBuilder;
+use crate::utils::file::file_helper;
 use crate::utils::slice::Slice;
+use prost::Message;
+use rand::Rng;
 use std::cmp::Ordering;
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use tokio::sync::mpsc;
+use tokio::time::{interval, sleep};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct CompactionPriority {
     level: u32,
     score: f64,
@@ -14,13 +24,14 @@ struct CompactionPriority {
     t: Targets,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Targets {
     base_level: u32,
     target_sz: Vec<u64>,
     file_sz: Vec<u64>,
 }
 
+#[derive(Clone, Debug)]
 struct CompactDef {
     compact_id: u32,
     t: Targets,
@@ -49,7 +60,7 @@ pub(crate) struct LevelCompactStatus {
     ranges: Vec<KeyRange>,
     del_sz: u64,
 }
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct KeyRange {
     left: Slice,
     right: Slice,
@@ -351,7 +362,42 @@ impl LevelManager {
         }
     }
 
-    fn do_compact(&self, id: u32, p: CompactionPriority) -> Result<(), String> {
+    pub async fn run_compacter(&self, id: u32) {
+        // simulate random delay before starting the compaction process
+        let random_delay = rand::thread_rng().gen_range(0..1000);
+        sleep(Duration::from_millis(random_delay as u64)).await;
+
+        // set up the periodic compaction ticker(every 5 seconds)
+        let mut ticker = tokio::time::interval(Duration::from_millis(5000));
+        loop {
+            tokio::select! {
+                // perform compaction once when the ticker triggers
+
+                _= ticker.tick()=>{
+                    if let Err(e) = self.run_once(id).await{
+                        println!("{e}");
+                    }
+                }
+            }
+        }
+    }
+
+    async fn run_once(&self, id: u32) -> Result<(), String> {
+        let mut prios = self.pick_compact_levels()?;
+
+        if id == 0 {
+            // No.0 corountine, always tends to compress L0
+            prios = Self::move_l0_to_front(prios);
+        }
+        for p in prios {
+            if (id == 0 && p.level == 0) || p.adjusted >= 1.0 {
+                return self.do_compact(id, p).await;
+            }
+        }
+        Err("no compact".to_string())
+    }
+
+    async fn do_compact(&self, id: u32, p: CompactionPriority) -> Result<(), String> {
         let l = p.level;
         let base_level = p.t.base_level;
         // crate real compressing plan
@@ -382,30 +428,174 @@ impl LevelManager {
             }
         }
 
+        self.run_compact_def(id, &mut cd).await?;
+
         Ok(())
     }
 
-    fn run_compact_def(&self, id: u32, cd: &CompactDef) -> Result<(), String> {
+    async fn run_compact_def(&self, id: u32, cd: &mut CompactDef) -> Result<(), String> {
+        let this_level = cd.this_level;
+        let next_level = cd.next_level;
+
+        if this_level != next_level {
+            self.add_splits(cd);
+        }
+
+        let new_tables = self.compact_build_tables(cd).await;
+
+        let change_set = Self::build_change_set(cd, &new_tables);
+        self.manifest_file
+            .write()
+            .unwrap()
+            .add_changes(change_set.changes)?;
+
+        self.replace_level_tables(cd.next_level, &cd.bot, new_tables);
+        self.delete_level_tables(cd.this_level, &cd.bot);
+
+        println!("{:?}", cd);
+
         Ok(())
     }
 
     // compact_build_tables merge two level ssts
-    fn compact_build_tables<'a>(&self, cd : &CompactDef){
-        let top_tables = &self.levels[cd.this_level as usize].read().unwrap().tables;
-        let bot_tables = &self.levels[cd.next_level as usize].read().unwrap().tables;
-
-        let mut v : Vec<Box<dyn DBIterator>>= Vec::new(); 
-        for &i in &cd.top{
-            v.push(Box::new(top_tables[i as usize].new_iterator()));
+    async fn compact_build_tables(&self, cd: &CompactDef) -> Vec<Table> {
+        // start parallel compression
+        let (tx, mut rx) = mpsc::channel::<Table>(3);
+        for kr in &cd.splits {
+            let tx = tx.clone();
+            let top = self.levels[cd.this_level as usize].clone();
+            let bot = self.levels[cd.next_level as usize].clone();
+            let cd = cd.clone();
+            let kr = kr.clone();
+            let opt = self.opt.clone();
+            tokio::spawn(async move {
+                Self::sub_compact(top, bot, cd, kr, tx, opt).await;
+            });
         }
-        for &i in &cd.bot{
-            v.push(Box::new(bot_tables[i as usize].new_iterator()));
-        }
+        drop(tx);
 
-        let merge_iter = MergeIterator::new(v);
+        let mut tables = Vec::new();
+        while let Some(table) = rx.recv().await {
+            tables.push(table);
+        }
+        tables.sort_by(|i, j| i.max_key().cmp(j.max_key()));
+        tables
     }
 
+    async fn sub_compact(
+        top: Level,
+        bot: Level,
+        cd: CompactDef,
+        kr: KeyRange,
+        tx: mpsc::Sender<Table>,
+        opt: Arc<Options>,
+    ) {
+        let top_tables = &top.read().unwrap().tables;
+        let bot_tables = &bot.read().unwrap().tables;
 
+        let mut v = Vec::new();
+        for &i in &cd.top {
+            v.push(top_tables[i as usize].new_iterator());
+        }
+        for &i in &cd.bot {
+            v.push(bot_tables[i as usize].new_iterator());
+        }
+
+        let mut merge_iter = MergeIterator::new(v);
+        let mut last_key = Slice::new();
+        let mut add_keys = |iter: &mut MergeIterator, builder: &mut TableBuilder| -> bool {
+            let mut table_kr = KeyRange::new();
+            for (key, val) in iter {
+                if key.cmp(&last_key) != Ordering::Equal {
+                    if val.is_empty() {
+                        last_key = key.clone();
+                        continue;
+                    }
+
+                    // key range in iter greater or equal than tmp kr, break
+                    if !kr.right.is_empty() && key.cmp(&kr.right).is_ge() {
+                        return true;
+                    }
+                    if builder.reach_capacity() {
+                        return false;
+                    }
+
+                    // set tmp key to last_key
+                    last_key = key.clone();
+
+                    // if left boundary is left, give tmp key to left boundary
+                    if table_kr.left.is_empty() {
+                        table_kr.left = key.clone();
+                    }
+
+                    // update right boundary
+                    table_kr.right = last_key.clone();
+                }
+            }
+            true
+        };
+
+        // if key range left live, seek to it
+        if kr.left.is_empty() == false {
+            merge_iter.seek(&kr.left);
+        }
+
+        loop {
+            let mut table_builder = TableBuilder::new(opt.clone());
+            let res = add_keys(&mut merge_iter, &mut table_builder);
+            let opt = opt.clone();
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                Self::build_table(opt, table_builder, tx).await;
+            });
+            if res {
+                return;
+            }
+        }
+    }
+
+    // a corountine to help build table
+    async fn build_table(opt: Arc<Options>, table_builder: TableBuilder, tx: mpsc::Sender<Table>) {
+        let new_id = opt
+            .max_fid
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        let sst_name = file_helper::file_sstable_name(&opt.work_dir, new_id);
+
+        let table = Table::Open(opt.clone(), sst_name, Some(table_builder)).unwrap();
+
+        tx.send(table).await;
+    }
+
+    // build changeset
+    fn build_change_set(cd: &CompactDef, new_tables: &Vec<Table>) -> ManifestChangeSet {
+        let mut changes = Vec::new();
+        for table in new_tables {
+            changes.push(Self::new_create_change(table.id().unwrap(), cd.next_level));
+        }
+        for table in &cd.tables {
+            changes.push(Self::new_delete_change(*table));
+        }
+        ManifestChangeSet { changes }
+    }
+
+    fn new_create_change(id: u64, level: u32) -> ManifestChange {
+        ManifestChange {
+            id,
+            op: 0,
+            level,
+            checksum: Vec::new(),
+        }
+    }
+
+    fn new_delete_change(id: u64) -> ManifestChange {
+        ManifestChange {
+            id,
+            op: 1,
+            level: 0,
+            checksum: Vec::new(),
+        }
+    }
 
     // returns the tables that intersect with key range
     fn get_level_overlapping_tables(

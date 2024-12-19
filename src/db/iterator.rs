@@ -1,6 +1,8 @@
+use crate::table::table::TableIterator;
 use crate::utils::slice::Slice;
 use std::cmp::Ordering;
 use std::collections::binary_heap::BinaryHeap;
+
 pub trait DBIterator {
     fn seek_to_first(&mut self);
     fn seek(&mut self, key: &Slice) -> Option<&Slice>;
@@ -18,9 +20,9 @@ struct Item {
 
 // if Item try to own &key of iters, but move iters in MergeIterator, it will
 // conflict
-pub struct MergeIterator {
+pub struct MergeIterator<'a> {
     heap: BinaryHeap<Item>,
-    iters: Vec<Box<dyn DBIterator>>,
+    iters: Vec<TableIterator<'a>>,
 }
 
 impl Ord for Item {
@@ -38,8 +40,8 @@ impl PartialOrd for Item {
     }
 }
 
-impl MergeIterator {
-    pub fn new(mut iters: Vec<Box<dyn DBIterator>>) -> Self {
+impl<'a> MergeIterator<'a> {
+    pub fn new(mut iters: Vec<TableIterator<'a>>) -> Self {
         let mut heap = BinaryHeap::new();
 
         for (idx, iter) in iters.iter_mut().enumerate() {
@@ -77,7 +79,7 @@ impl MergeIterator {
     }
 }
 
-impl Iterator for MergeIterator {
+impl<'a> Iterator for MergeIterator<'a> {
     type Item = (Slice, Slice);
 
     fn next(&mut self) -> Option<Self::Item> {

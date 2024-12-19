@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicU64;
 #[derive(Default)]
 pub struct Options {
     pub work_dir: String,
@@ -13,6 +14,8 @@ pub struct Options {
     pub table_size_multiplier: u32,
     pub num_level_zero_tables: u32,
     pub max_level_num: u32,
+
+    pub max_fid: AtomicU64,
 }
 
 impl Options {
@@ -30,6 +33,8 @@ impl Options {
             table_size_multiplier: 2,
             num_level_zero_tables: 15,
             max_level_num: 7,
+
+            max_fid : AtomicU64::new(0),
         }
     }
 }

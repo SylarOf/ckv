@@ -3,16 +3,17 @@ use super::options::Options;
 use crate::file::manifest::ManifestFile;
 use crate::table::table::Table;
 use crate::utils::file::file_helper;
+use crate::utils::slice::Slice;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, RwLock,
 };
 
-pub type Level = RwLock<LevelHandler>;
+pub type Level = Arc<RwLock<LevelHandler>>;
 pub(crate) struct LevelManager {
     pub(crate) max_fid: AtomicU64,
     pub(crate) opt: Arc<Options>,
-    pub(crate) manifest_file: ManifestFile,
+    pub(crate) manifest_file: RwLock<ManifestFile>,
     pub(crate) levels: Vec<Level>,
     pub(crate) compact_state: RwLock<CompactStatus>,
 }
@@ -61,11 +62,12 @@ impl LevelManager {
 
             level.sort();
         }
+        let levels = levels.into_iter().map(|x| Arc::new(x)).collect();
 
         Ok(LevelManager {
             max_fid: AtomicU64::new(max_fid),
             opt,
-            manifest_file,
+            manifest_file: RwLock::new(manifest_file),
             levels,
             compact_state: RwLock::new(CompactStatus::default()),
         })
@@ -79,7 +81,65 @@ impl LevelManager {
         self.levels[idx as usize].read().unwrap().total_size
     }
 
+    // to replace level tables
+    pub fn replace_level_tables(
+        &self,
+        level: u32,
+        del_tables: &Vec<u32>,
+        mut new_tables: Vec<Table>,
+    ) {
+        let mut level = self.levels[level as usize].write().unwrap();
+        for i in del_tables {
+            level.tables.remove(*i as usize);
+            level.total_size -= level.tables[*i as usize].size();
+        }
 
+        level.tables.append(&mut new_tables);
+        level.sort();
+    }
+
+    // to delete level tables
+    pub fn delete_level_tables(&self, level: u32, del_tables: &Vec<u32>) {
+        let mut level = self.levels[level as usize].write().unwrap();
+        for i in del_tables {
+            level.tables.remove(*i as usize);
+            level.total_size -= level.tables[*i as usize].size();
+        }
+    }
+
+    // search key in L0 ssts
+    pub fn search_L0_sst(&self, key: &[u8]) -> Option<Slice> {
+        let tables = &self.levels[0].read().unwrap().tables;
+        for table in tables {
+            let mut iter = table.new_iterator();
+            if let Some(val) = iter.seek(key) {
+                return Some(val.clone());
+            }
+        }
+        None
+    }
+
+    // search key in LN ssts
+    pub fn search_ln_sst(&self, level: u32, key: &[u8]) -> Option<Slice> {
+        let tables = &self.levels[level as usize].read().unwrap().tables;
+        if tables.is_empty() {
+            return None;
+        }
+
+        if key.cmp(&tables[0].min_key()).is_lt() {
+            return None;
+        } else {
+            for table in tables {
+                if key.cmp(&table.min_key()).is_ge() && key.cmp(&table.max_key()).is_le() {
+                    let mut iter = table.new_iterator();
+                    if let Some(val) = iter.seek(key) {
+                        return Some(val.clone());
+                    }
+                }
+            }
+        }
+        None
+    }
 }
 
 impl LevelHandler {

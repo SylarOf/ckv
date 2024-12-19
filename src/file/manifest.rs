@@ -215,8 +215,11 @@ impl Manifest {
             if self.tables.contains_key(&c.id) == false {
                 return Err(format!("manifest removes non-existing table {}", c.id));
             }
-            self.levels[c.level as usize].remove(&c.id);
+            let tm = &self.tables[&c.id];
+            
+            self.levels[tm.level as usize].remove(&c.id);
             self.tables.remove(&c.id);
+            self.deletions += 1;
         }
         Ok(())
     }

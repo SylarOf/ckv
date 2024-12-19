@@ -48,7 +48,8 @@ impl Filter {
             if self.filter[bit_pos as usize / 8] & (1 << (bit_pos % 8)) == 0 {
                 return false;
             }
-            h += delta;
+            //h += delta;
+            h = h.wrapping_add(delta);
         }
         true
     }
@@ -80,7 +81,8 @@ impl Filter {
             for _ in 0..k {
                 let bitpos = h % (n_bits as u32);
                 filter[(bitpos / 8) as usize] |= 1 << (bitpos % 8);
-                h += delta;
+                //h += delta;
+                h = h.wrapping_add(delta);
             }
         }
 
