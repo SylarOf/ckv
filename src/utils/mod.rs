@@ -5,5 +5,4 @@ mod filter_cargo;
 pub mod slice;
 pub mod file;
 pub mod filter_outer;
-pub mod wal;
 pub mod test_helper;

@@ -1,3 +1,4 @@
+#[derive(Debug,Clone)]
 pub struct Options {
     pub file_name: String,
     pub dir: String,

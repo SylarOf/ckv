@@ -17,8 +17,27 @@ pub mod file_helper {
 
     use std::collections::HashSet;
 
+    // use id to get wal file name
+    pub fn file_wal_name(id: u64) -> String {
+        let file_name = format!("{:05}.wal", id);
+        file_name
+    }
+    // use id to get wal file name with dir
+    pub fn file_wal_name_with_dir(dir: &str, id: u64) -> String {
+        let file_name = format!("{:05}.wal", id);
+        std::path::Path::new(&dir)
+            .join(&file_name)
+            .to_str()
+            .unwrap()
+            .to_string()
+    }
     // use id to get sst file name
-    pub fn file_sstable_name(dir: &str, id: u64) -> String {
+    pub fn file_sstable_name(id: u64) -> String {
+        let file_name = format!("{:05}.sst", id);
+        file_name
+    }
+    // use id to get sst file name with dir
+    pub fn file_sstable_name_with_dir(dir: &str, id: u64) -> String {
         let file_name = format!("{:05}.sst", id);
         std::path::Path::new(&dir)
             .join(&file_name)
@@ -57,5 +76,20 @@ pub mod file_helper {
             }
         }
         Ok(set)
+    }
+
+    // use wal file name to get its fid
+    pub fn fid_wal(name: &str) -> Result<u64, String> {
+        if !name.ends_with(".wal") {
+            return Err("not a wal  file".to_string());
+        }
+
+        // remove the ".wal" suffix
+        let name = name.trim_end_matches(".wal");
+
+        match name.parse::<u64>() {
+            Ok(id) => Ok(id),
+            Err(e) => Err(e.to_string()),
+        }
     }
 }

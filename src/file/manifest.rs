@@ -1,7 +1,7 @@
 use crate::db::options::Options;
 use crate::file::file;
 use crate::pb::pb;
-use crate::utils::file::file_helper::file_sstable_name;
+use crate::utils::file::file_helper::file_sstable_name_with_dir;
 use prost::Message;
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
@@ -30,6 +30,10 @@ pub struct TableManifest {
     pub checksum: Vec<u8>,
 }
 
+pub struct TableMeta {
+    pub(crate) id: u64,
+    pub(crate) checksum: Vec<u8>,
+}
 impl ManifestFile {
     pub fn open(opt: Arc<Options>) -> std::io::Result<ManifestFile> {
         let manifest_path = std::path::Path::new(&opt.work_dir).join(file::MANIFSET_NAME);
@@ -90,7 +94,7 @@ impl ManifestFile {
         }
         for fid in set {
             if self.manifest.tables.contains_key(&fid) == false {
-                let filename = file_sstable_name(&self.opt.work_dir, fid);
+                let filename = file_sstable_name_with_dir(&self.opt.work_dir, fid);
                 if let Err(e) = std::fs::remove_file(filename) {
                     return Err(format!("remove file error, {}", e));
                 }
@@ -100,6 +104,13 @@ impl ManifestFile {
     }
     pub fn get_manifest(&self) -> &Manifest {
         &self.manifest
+    }
+
+    pub fn add_table_meta(&mut self, level: u32, t: TableMeta) -> Result<(), String> {
+        let change = Manifest::new_create_change(&t.id, &level, &t.checksum);
+        let mut v = Vec::new();
+        v.push(change);
+        self.add_changes(v)
     }
 
     fn help_rwrite(dir: &String, m: &Manifest) -> std::io::Result<(File, u32)> {
@@ -216,7 +227,7 @@ impl Manifest {
                 return Err(format!("manifest removes non-existing table {}", c.id));
             }
             let tm = &self.tables[&c.id];
-            
+
             self.levels[tm.level as usize].remove(&c.id);
             self.tables.remove(&c.id);
             self.deletions += 1;

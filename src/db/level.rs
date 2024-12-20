@@ -44,7 +44,7 @@ impl LevelManager {
         let mut max_fid = 0;
 
         for (&fid, table_info) in &manifest.tables {
-            let file_name = file_helper::file_sstable_name(&opt.work_dir, fid);
+            let file_name = file_helper::file_sstable_name(fid);
             max_fid = std::cmp::max(max_fid, fid);
 
             let table = Table::Open(opt.clone(), file_name, None)
@@ -105,6 +105,20 @@ impl LevelManager {
             level.tables.remove(*i as usize);
             level.total_size -= level.tables[*i as usize].size();
         }
+    }
+
+    // get val form the key
+    pub fn get(&self, key: &[u8]) -> Option<Slice> {
+        if let Some(val) = self.search_L0_sst(key) {
+            return Some(val);
+        }
+        for i in 1..self.opt.max_level_num {
+            if let Some(val) = self.search_ln_sst(i, key) {
+                return Some(val);
+            }
+        }
+
+        None
     }
 
     // search key in L0 ssts

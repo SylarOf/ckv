@@ -560,7 +560,7 @@ impl LevelManager {
             .max_fid
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-        let sst_name = file_helper::file_sstable_name(&opt.work_dir, new_id);
+        let sst_name = file_helper::file_sstable_name(new_id);
 
         let table = Table::Open(opt.clone(), sst_name, Some(table_builder)).unwrap();
 
