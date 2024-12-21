@@ -76,7 +76,7 @@ impl ManifestFile {
         self.manifest.apply_change_set(cs)?;
 
         let mut v = Vec::new();
-        v.extend_from_slice(&buf.len().to_le_bytes());
+        v.extend_from_slice(&(buf.len() as u32).to_le_bytes());
         let crc32 = crate::utils::file::calculate_checksum32(&buf);
         v.extend_from_slice(&crc32.to_le_bytes());
 
@@ -133,7 +133,7 @@ impl ManifestFile {
 
         let num_creations = m.tables.len();
         let changes = m.as_changes();
-        let changes_len = changes.len();
+        let changes_len = changes.len() as u32;
         let c_set = pb::ManifestChangeSet { changes };
 
         let changes_buf = c_set.encode_to_vec();
@@ -142,8 +142,11 @@ impl ManifestFile {
         buf.extend_from_slice(&checksum.to_be_bytes());
         buf.extend_from_slice(&changes_buf);
 
+        // debug!
+        //println!("{:?}", buf);
+
         file.write_all(&buf)?;
-        file.sync_all();
+        file.sync_all()?;
 
         let manifest_path = std::path::Path::new(&dir).join(file::MANIFSET_NAME);
         std::fs::rename(rewrite_path, &manifest_path)?;
@@ -179,21 +182,31 @@ impl Manifest {
         };
 
         let mut manifest = Manifest::new();
-        let mut crc_buf = [0u8; 8];
-        file.read_exact(&mut crc_buf).unwrap();
+        loop {
+            let mut crc_buf = [0u8; 8];
+            file.read_exact(&mut crc_buf).unwrap();
 
-        let data_len = u32::from_le_bytes(crc_buf[0..4].try_into().unwrap());
-        let crc = &crc_buf[4..8];
+            let data_len = u32::from_le_bytes(crc_buf[0..4].try_into().unwrap());
 
-        let mut data_buf = vec![0u8; data_len as usize];
-        file.read_exact(&mut data_buf);
+            // if no changes to read
+            if data_len == 0 {
+                break;
+            }
+            let crc = &crc_buf[4..8];
 
-        if crate::utils::file::verify_checksum(&data_buf, crc) == false {
-            return Err("checksum not equal".to_string());
+            let mut data_buf = vec![0u8; data_len as usize];
+            file.read_exact(&mut data_buf).unwrap();
+
+            // debug
+            //println!("{:?}", data_buf);
+            //println!("{:?}",crc);
+            if crate::utils::file::verify_checksum_32(&data_buf, crc) == false {
+                return Err("checksum not equal".to_string());
+            }
+            let change_set = pb::ManifestChangeSet::decode(&data_buf[..]).unwrap();
+
+            manifest.apply_change_set(change_set).unwrap();
         }
-        let change_set = pb::ManifestChangeSet::decode(&data_buf[..]).unwrap();
-
-        manifest.apply_change_set(change_set).unwrap();
 
         Ok(manifest)
     }

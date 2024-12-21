@@ -52,3 +52,12 @@ pub fn generate_incredible_strings(num: usize) -> Vec<String> {
 pub fn display(s: &Vec<u8>) -> Result<String, std::string::FromUtf8Error> {
     String::from_utf8(s.clone())
 }
+
+pub fn work_dir_clear(dir: &str) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        std::fs::remove_file(path)?
+    }
+    Ok(())
+}

@@ -1,6 +1,6 @@
 pub mod iterator;
 pub mod options;
-mod db;
+pub mod db;
 mod memtable;
 mod level;
 mod compact;

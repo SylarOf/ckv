@@ -10,6 +10,7 @@ use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
 
 pub struct SSTable {
+    dir: String,
     name: String,
     f: MmapMut,
     max_key: Slice,
@@ -32,6 +33,7 @@ impl SSTable {
         }
         let metadata = file.metadata()?;
         Ok(SSTable {
+            dir: opt.dir,
             name: opt.file_name,
             f: unsafe { MmapMut::map_mut(&file)? },
             max_key: Slice::new(),
@@ -107,12 +109,14 @@ impl SSTable {
         self.f.len() as u64
     }
 
-    pub fn delete(&mut self) -> io::Result<()> {
-        std::fs::remove_file(self.name.clone())
-    }
-
     pub fn get_create_at(&self) -> SystemTime {
         self.created_at
+    }
+
+    // delete the sst file
+    pub fn delete(&self) -> std::io::Result<()> {
+        let path = std::path::Path::new(&self.dir).join(&self.name);
+        std::fs::remove_file(path)
     }
 
     fn init_table(&mut self) -> Result<pb::BlockOffset, String> {

@@ -56,6 +56,7 @@ pub(crate) struct CompactStatus {
 }
 
 // level compact status
+#[derive(Default)]
 pub(crate) struct LevelCompactStatus {
     ranges: Vec<KeyRange>,
     del_sz: u64,
@@ -261,18 +262,21 @@ impl LevelManager {
             }
         }
 
-        let (left, right) = self.get_level_overlapping_tables(cd.next_level as usize, &kr)?;
         cd.top = out;
         cd.this_range = kr;
-        let v: Vec<u32> = (left as u32..=right as u32).collect();
+        if let Ok((left, right)) =
+            self.get_level_overlapping_tables(cd.next_level as usize, &cd.this_range)
+        {
+            let v: Vec<u32> = (left as u32..=right as u32).collect();
 
-        let bot = &self.levels[cd.next_level as usize].read().unwrap().tables;
-        let bot: Vec<&Table> = v.iter().map(|&i| &bot[i as usize]).collect();
-        cd.bot = v;
-        cd.next_range = KeyRange::with_tables(&bot);
-        for table in bot {
-            cd.this_sz += table.size();
-            cd.tables.push(table.id().unwrap());
+            let bot = &self.levels[cd.next_level as usize].read().unwrap().tables;
+            let bot: Vec<&Table> = v.iter().map(|&i| &bot[i as usize]).collect();
+            cd.bot = v;
+            cd.next_range = KeyRange::with_tables(&bot);
+            for table in bot {
+                cd.this_sz += table.size();
+                cd.tables.push(table.id().unwrap());
+            }
         }
 
         self.compact_state.write().unwrap().compare_and_add(&cd)
@@ -363,6 +367,9 @@ impl LevelManager {
     }
 
     pub async fn run_compacter(&self, id: u32) {
+        // debug!
+        println!("run compacter id : {}", id);
+
         // simulate random delay before starting the compaction process
         let random_delay = rand::thread_rng().gen_range(0..1000);
         sleep(Duration::from_millis(random_delay as u64)).await;
@@ -383,6 +390,8 @@ impl LevelManager {
     }
 
     async fn run_once(&self, id: u32) -> Result<(), String> {
+        // debug
+        println!("compact run once id : {}", id);
         let mut prios = self.pick_compact_levels()?;
 
         if id == 0 {
@@ -434,6 +443,9 @@ impl LevelManager {
     }
 
     async fn run_compact_def(&self, id: u32, cd: &mut CompactDef) -> Result<(), String> {
+        //debug !
+        println!("{:?}", cd);
+
         let this_level = cd.this_level;
         let next_level = cd.next_level;
 
@@ -449,10 +461,15 @@ impl LevelManager {
             .unwrap()
             .add_changes(change_set.changes)?;
 
+        let new_tables_id: Vec<u64> = new_tables.iter().map(|table| table.id().unwrap()).collect();
+
         self.replace_level_tables(cd.next_level, &cd.bot, new_tables);
         self.delete_level_tables(cd.this_level, &cd.bot);
 
-        println!("{:?}", cd);
+        println!(
+            "create new tables \n : {:?}\n delete tables :{:?}",
+            new_tables_id, cd.tables
+        );
 
         Ok(())
     }
@@ -562,7 +579,7 @@ impl LevelManager {
 
         let sst_name = file_helper::file_sstable_name(new_id);
 
-        let table = Table::Open(opt.clone(), sst_name, Some(table_builder)).unwrap();
+        let table = Table::open(opt.clone(), sst_name, Some(table_builder)).unwrap();
 
         tx.send(table).await;
     }
@@ -709,6 +726,16 @@ impl KeyRange {
 }
 
 impl CompactStatus {
+    pub fn new(opt: Arc<Options>) -> Self {
+        let mut v = Vec::new();
+        for _ in 0..opt.max_level_num as usize {
+            v.push(LevelCompactStatus::default());
+        }
+        CompactStatus {
+            levels: v,
+            tables: HashSet::new(),
+        }
+    }
     fn compare_and_add(&mut self, cd: &CompactDef) -> Result<(), String> {
         {
             let this_level = &self.levels[cd.this_level as usize];

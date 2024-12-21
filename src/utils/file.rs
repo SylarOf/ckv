@@ -12,6 +12,10 @@ pub fn calculate_checksum32(data: &[u8]) -> u32 {
 pub fn verify_checksum(data: &[u8], checksum: &[u8]) -> bool {
     calculate_checksum(data).to_le_bytes() == checksum
 }
+pub fn verify_checksum_32(data: &[u8], checksum: &[u8]) -> bool {
+    calculate_checksum32(data).to_le_bytes() == checksum
+}
+
 
 pub mod file_helper {
 

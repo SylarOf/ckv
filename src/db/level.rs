@@ -11,7 +11,6 @@ use std::sync::{
 
 pub type Level = Arc<RwLock<LevelHandler>>;
 pub(crate) struct LevelManager {
-    pub(crate) max_fid: AtomicU64,
     pub(crate) opt: Arc<Options>,
     pub(crate) manifest_file: RwLock<ManifestFile>,
     pub(crate) levels: Vec<Level>,
@@ -47,7 +46,7 @@ impl LevelManager {
             let file_name = file_helper::file_sstable_name(fid);
             max_fid = std::cmp::max(max_fid, fid);
 
-            let table = Table::Open(opt.clone(), file_name, None)
+            let table = Table::open(opt.clone(), file_name, None)
                 .map_err(|e| format!("faild to open the table {}, {}", &fid, e))?;
 
             let mut level = levels[table_info.level as usize]
@@ -57,6 +56,7 @@ impl LevelManager {
             level.add(table);
         }
 
+        opt.max_fid.store(max_fid, Ordering::Relaxed);
         for level in &levels {
             let mut level = level.write().map_err(|e| e.to_string())?;
 
@@ -65,11 +65,10 @@ impl LevelManager {
         let levels = levels.into_iter().map(|x| Arc::new(x)).collect();
 
         Ok(LevelManager {
-            max_fid: AtomicU64::new(max_fid),
-            opt,
+            opt: opt.clone(),
             manifest_file: RwLock::new(manifest_file),
             levels,
-            compact_state: RwLock::new(CompactStatus::default()),
+            compact_state: RwLock::new(CompactStatus::new(opt)),
         })
     }
 
@@ -90,8 +89,9 @@ impl LevelManager {
     ) {
         let mut level = self.levels[level as usize].write().unwrap();
         for i in del_tables {
-            level.tables.remove(*i as usize);
             level.total_size -= level.tables[*i as usize].size();
+            level.tables[*i as usize].decr_ref().unwrap();
+            level.tables.remove(*i as usize);
         }
 
         level.tables.append(&mut new_tables);
@@ -102,8 +102,9 @@ impl LevelManager {
     pub fn delete_level_tables(&self, level: u32, del_tables: &Vec<u32>) {
         let mut level = self.levels[level as usize].write().unwrap();
         for i in del_tables {
-            level.tables.remove(*i as usize);
             level.total_size -= level.tables[*i as usize].size();
+            level.tables[*i as usize].decr_ref().unwrap();
+            level.tables.remove(*i as usize);
         }
     }
 

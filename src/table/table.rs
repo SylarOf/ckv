@@ -4,16 +4,18 @@ use crate::file::file;
 use crate::file::sstable::SSTable;
 use crate::table::table_builder::{BlockIterator, TableBuilder};
 use crate::utils::slice::Slice;
+use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::SystemTime;
 
 pub struct Table {
     sstable: SSTable,
+    ref_count: AtomicU32,
     //opt: Arc<Options>,
 }
 
 impl Table {
-    pub fn Open(
+    pub fn open(
         opt: Arc<Options>,
         name: String,
         table_builder: Option<TableBuilder>,
@@ -32,7 +34,27 @@ impl Table {
         }
 
         table.init().unwrap();
-        Ok(Table { sstable: table })
+        Ok(Table {
+            sstable: table,
+            ref_count: AtomicU32::new(1),
+        })
+    }
+
+    // incre ref count of table
+    pub fn incr_ref(&self) {
+        self.ref_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    // decre ref count of table, if count is 0, delete file
+    pub fn decr_ref(&self) -> std::io::Result<()> {
+        let ref_count = self
+            .ref_count
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        if ref_count == 0 {
+            self.sstable.delete()?
+        }
+        Ok(())
     }
 
     pub fn new_iterator(&self) -> TableIterator {
@@ -103,7 +125,7 @@ impl<'a> TableIterator<'a> {
         let data = self.table.sstable.read(offsets.offset, offsets.len);
 
         //debug
-        println!("{:?}", data);
+        //println!("{:?}", data);
         let base_key = offsets.key;
 
         self.bi = BlockIterator::new(data, &base_key);
@@ -135,6 +157,7 @@ impl<'a> DBIterator for TableIterator<'a> {
         self.val()
     }
 }
+
 mod tests {
     use super::*;
     use crate::utils::test_helper;
@@ -155,7 +178,7 @@ mod tests {
 
         let sstable = table_builder.flush("001".to_string()).unwrap();
 
-        let table = Table::Open(option.clone(), "001".to_string(), None).unwrap();
+        let table = Table::open(option.clone(), "001".to_string(), None).unwrap();
 
         let mut iter = table.new_iterator();
         iter.seek_to_first();

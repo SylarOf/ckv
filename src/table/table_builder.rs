@@ -137,7 +137,7 @@ impl TableBuilder {
         self.cur_block.end+=data.len() as u32;
 
         // debug
-        println!("now block end: {}", self.cur_block.end);
+        //println!("now block end: {}", self.cur_block.end);
         self.cur_block.data.append(data);
     }
     fn allocate(&mut self, need : i32){
@@ -230,7 +230,7 @@ impl TableBuilder {
         bd.size = data_size + bd.index.len() as u32 + bd.checksum.len() as u32 + 4 + 4;
         
         // debug!
-        println!("bd.size : {}, data size: {}, index size {}",bd.size, data_size, bd.index.len());
+        //println!("bd.size : {}, data size: {}, index size {}",bd.size, data_size, bd.index.len());
         bd
 
     }
@@ -280,14 +280,15 @@ impl BuildData{
         v.extend_from_slice(&self.index);
         let index_size = v.len() - data_size;
         v.extend_from_slice(&(self.index.len() as u32).to_le_bytes());
-        println!("{}", v.len());
+        //debug
+        //println!("{}", v.len());
         v.extend_from_slice(&self.checksum);
-        println!("{}", v.len());
+        //println!("{}", v.len());
         v.extend_from_slice(&(self.checksum.len() as u32).to_le_bytes());
-        println!("{}", v.len());
+        //println!("{}", v.len());
 
         // debug!
-        println!("slice size : {}, data size : {}, index size : {}", v.len(), data_size,index_size);
+        //println!("slice size : {}, data size : {}, index size : {}", v.len(), data_size,index_size);
         v
     }
 }
@@ -389,7 +390,7 @@ impl <'a>BlockIterator<'a> {
 
 
         //debug
-        println!("num entries : {}", num_entries);
+        //println!("num entries : {}", num_entries);
         // read entry_offsets
         let entry_offsets = &data[read_pos-num_entries as usize*4.. read_pos];
         for i in 0..num_entries as usize{
@@ -406,7 +407,7 @@ impl <'a>BlockIterator<'a> {
     fn set_idx(&mut self,i : i32){
 
         //debug
-        println!("now idx in block iter, {}", i);
+        //println!("now idx in block iter, {}", i);
         self.idx = i;
         assert!(i>=0 && i < self.entry_offsets.len() as i32);
         let start_offset = self.entry_offsets[i as usize];
@@ -420,7 +421,7 @@ impl <'a>BlockIterator<'a> {
         let entry = &self.data[start_offset as usize..end_offset as usize];
 
         //debug
-        println!("entry : {:?}",entry);
+        //println!("entry : {:?}",entry);
         let header = Header::decode(&entry[0..4]);
         let mut key = Slice::new();
         key.extend_from_slice(&self.base_key[0..header.overlap as usize]); 

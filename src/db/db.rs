@@ -9,7 +9,7 @@ use crate::utils::slice::Slice;
 use std::sync::Arc;
 
 pub(crate) struct DB {
-    mem_table: MemTable,
+    mem_table: Option<MemTable>,
     immu_mem_tables: Vec<MemTable>,
     levels: Arc<LevelManager>,
     opt: Arc<Options>,
@@ -19,7 +19,7 @@ impl DB {
     pub fn open(opt: Arc<Options>) -> Result<Self, String> {
         let level_manager = Arc::new(LevelManager::new(opt.clone())?);
         let mut db = DB {
-            mem_table: MemTable::new(opt.clone()).map_err(|e| e.to_string())?,
+            mem_table: None,
             immu_mem_tables: Vec::new(),
             levels: level_manager,
             opt,
@@ -33,20 +33,25 @@ impl DB {
         let key = key.as_ref().as_bytes();
         let val = val.as_ref().as_bytes();
         // check if memtable is full
-        if self.mem_table.size() + key.len() + val.len() > self.opt.memtable_size as usize {
-            self.immu_mem_tables.push(std::mem::replace(
-                &mut self.mem_table,
-                MemTable::new(self.opt.clone()).map_err(|e| e.to_string())?,
-            ));
+
+        if let Some(mem_table) = &self.mem_table {
+            if mem_table.size() + key.len() + val.len() > self.opt.memtable_size as usize {
+                self.immu_mem_tables.push(self.mem_table.take().unwrap());
+                self.mem_table = Some(MemTable::new(self.opt.clone()).map_err(|e| e.to_string())?);
+            }
+        }
+        if let Some(mem_table) = &mut self.mem_table {
+            mem_table.insert(key, val);
         }
 
-        self.mem_table.insert(key, val);
-        let immu_mem_tables = std::mem::replace(&mut self.immu_mem_tables, Vec::new());
-        for immu_mem_table in immu_mem_tables {
-            let wal_name =
-                file_helper::file_wal_name_with_dir(&self.opt.work_dir, immu_mem_table.id()?);
-            self.flush_memtable(immu_mem_table)?;
-            std::fs::remove_file(wal_name).map_err(|e| e.to_string())?;
+        if self.immu_mem_tables.is_empty() == false {
+            let immu_mem_tables = std::mem::replace(&mut self.immu_mem_tables, Vec::new());
+            for immu_mem_table in immu_mem_tables {
+                let wal_name =
+                    file_helper::file_wal_name_with_dir(&self.opt.work_dir, immu_mem_table.id()?);
+                self.flush_memtable(immu_mem_table)?;
+                std::fs::remove_file(wal_name).map_err(|e| e.to_string())?;
+            }
         }
 
         Ok(())
@@ -54,8 +59,11 @@ impl DB {
 
     pub fn get<T: AsRef<str>>(&self, key: T) -> Option<Slice> {
         let key = key.as_ref().as_bytes();
-        if let Some(val) = self.mem_table.seek(key) {
-            return Some(val);
+
+        if let Some(mem_table) = &self.mem_table {
+            if let Some(val) = mem_table.seek(key) {
+                return Some(val);
+            }
         }
 
         for immu_mem_table in &self.immu_mem_tables {
@@ -67,8 +75,11 @@ impl DB {
         self.levels.get(key)
     }
 
-    async fn start_compacter(&self) {
+    // debug!
+    // pub for debug
+    pub async fn start_compacter(&self) {
         let num = self.opt.num_compactors;
+
         for i in 0..num {
             let levels = self.levels.clone();
             tokio::spawn(async move {
@@ -103,6 +114,8 @@ impl DB {
             self.immu_mem_tables.push(mem);
         }
 
+        self.mem_table = Some(MemTable::new(self.opt.clone())?);
+
         Ok(())
     }
 
@@ -120,7 +133,7 @@ impl DB {
 
         // create a table
 
-        let table = Table::Open(self.opt.clone(), sst_name, Some(table_builder))
+        let table = Table::open(self.opt.clone(), sst_name, Some(table_builder))
             .map_err(|e| e.to_string())?;
         let mut manifest_file = self.levels.manifest_file.write().unwrap();
 
@@ -145,7 +158,16 @@ mod tests {
     #[tokio::test]
     async fn test_db_start() {
         let opt = Options::test_new();
-        let db = DB::open(Arc::new(opt)).unwrap();
+        test_helper::work_dir_clear(&opt.work_dir).unwrap();
+        let mut db = DB::open(Arc::new(opt)).unwrap();
         db.start_compacter().await;
+
+        let v = test_helper::generate_incredible_strings(1000);
+        for x in &v {
+            db.set(x, x).unwrap();
+        }
+
+        loop {}
+
     }
 }
