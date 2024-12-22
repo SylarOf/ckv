@@ -4,6 +4,7 @@ use crate::file::manifest::ManifestFile;
 use crate::table::table::Table;
 use crate::utils::file::file_helper;
 use crate::utils::slice::Slice;
+use std::collections::HashSet;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, RwLock,
@@ -84,14 +85,21 @@ impl LevelManager {
     pub fn replace_level_tables(
         &self,
         level: u32,
-        del_tables: &Vec<u32>,
+        mut del_tables: Vec<u32>,
         mut new_tables: Vec<Table>,
     ) {
         let mut level = self.levels[level as usize].write().unwrap();
+
+        let mut count = 0;
+        for i in &mut del_tables {
+            *i -= count;
+            count += 1;
+        }
+
         for i in del_tables {
-            level.total_size -= level.tables[*i as usize].size();
-            level.tables[*i as usize].decr_ref().unwrap();
-            level.tables.remove(*i as usize);
+            level.total_size -= level.tables[i as usize].size();
+            level.tables[i as usize].decr_ref().unwrap();
+            level.tables.remove(i as usize);
         }
 
         level.tables.append(&mut new_tables);
@@ -99,12 +107,19 @@ impl LevelManager {
     }
 
     // to delete level tables
-    pub fn delete_level_tables(&self, level: u32, del_tables: &Vec<u32>) {
+    pub fn delete_level_tables(&self, level: u32, mut del_tables: Vec<u32>) {
         let mut level = self.levels[level as usize].write().unwrap();
+
+        let mut count = 0;
+        for i in &mut del_tables {
+            *i -= count;
+            count += 1;
+        }
+
         for i in del_tables {
-            level.total_size -= level.tables[*i as usize].size();
-            level.tables[*i as usize].decr_ref().unwrap();
-            level.tables.remove(*i as usize);
+            level.total_size -= level.tables[i as usize].size();
+            level.tables[i as usize].decr_ref().unwrap();
+            level.tables.remove(i as usize);
         }
     }
 

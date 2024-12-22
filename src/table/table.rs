@@ -34,10 +34,18 @@ impl Table {
         }
 
         table.init().unwrap();
-        Ok(Table {
+
+        let mut res = Table {
             sstable: table,
             ref_count: AtomicU32::new(1),
-        })
+        };
+
+        let mut iter = res.new_iterator();
+        iter.seek_to_last();
+
+        res.sstable.set_max_key(iter.key().clone());
+
+        Ok(res)
     }
 
     // incre ref count of table
@@ -48,9 +56,10 @@ impl Table {
 
     // decre ref count of table, if count is 0, delete file
     pub fn decr_ref(&self) -> std::io::Result<()> {
-        let ref_count = self
-            .ref_count
+        self.ref_count
             .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+
+        let ref_count = self.ref_count.load(std::sync::atomic::Ordering::Relaxed);
         if ref_count == 0 {
             self.sstable.delete()?
         }
@@ -92,6 +101,12 @@ impl<'a> TableIterator<'a> {
     pub fn seek_to_first(&mut self) {
         self.set_block(0);
         self.bi.seek_to_first();
+    }
+
+    pub fn seek_to_last(&mut self) {
+        let idx = self.table.sstable.last_offset_idx();
+        self.set_block(idx);
+        self.bi.seek_to_last();
     }
 
     pub fn key(&self) -> &Slice {

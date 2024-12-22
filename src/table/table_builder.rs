@@ -339,7 +339,7 @@ impl <'a>BlockIterator<'a> {
             seek_arr.push(i);
         }
         let found_idx = seek_arr.binary_search_by(|&i|{
-            println!("i is {}", i);
+            //println!("i is {}", i);
             self.set_idx(i as i32);
             self.key.cmp(&Vec::from(key))
         });
@@ -368,13 +368,13 @@ impl <'a>BlockIterator<'a> {
         let data = self.data;
         let mut read_pos = data.len();
 
-        println!("data len : {}",data.len());
+        //println!("data len : {}",data.len());
         
         // read checksum_len
         let checksum_len = u32::from_le_bytes(data[read_pos-4..read_pos].try_into().unwrap());
         read_pos -=4;
 
-        println!("checksum len:{}",checksum_len);
+        //println!("checksum len:{}",checksum_len);
 
         // read checksum
         let checksum = &data[read_pos-checksum_len as usize..read_pos as usize];

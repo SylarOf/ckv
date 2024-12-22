@@ -53,11 +53,17 @@ impl SSTable {
     pub fn read(&self, pos: u32, len: u32) -> &[u8] {
         &self.f[pos as usize..(pos + len) as usize]
     }
+
     pub fn offsets(&self, i: u32) -> Option<pb::BlockOffset> {
         if i as usize >= self.table_index.offsets.len() {
             return None;
         }
         Some(self.table_index.offsets[i as usize].clone())
+    }
+
+    // get last block index
+    pub fn last_offset_idx(&self) -> u32 {
+        self.table_index.offsets.len() as u32 - 1
     }
 
     // binary serach key in block

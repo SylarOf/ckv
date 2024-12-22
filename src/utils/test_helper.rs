@@ -1,20 +1,6 @@
-use rand::Rng;
+use rand::{seq::IteratorRandom, Rng};
 use std::fmt;
 
-pub fn rand_str(length: usize) -> String {
-    let str = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ~=+%^*/()[]{}/!@#$?|©®😁😭🉑️🐂㎡硬核课堂";
-    let chars: Vec<char> = str.chars().collect(); // Convert to a Vec<char> for direct UTF-8 handling
-
-    let mut rng = rand::thread_rng(); // No need to manually seed
-
-    let mut result = String::with_capacity(length);
-    for _ in 0..length {
-        let random_index = rng.gen_range(0..chars.len());
-        result.push(chars[random_index]);
-    }
-
-    result
-}
 pub fn generate_incredible_strings(num: usize) -> Vec<String> {
     // Define the alphabet
     let alphabet = "abcdefghijklmnopqrstuvwxyz";
@@ -60,4 +46,21 @@ pub fn work_dir_clear(dir: &str) -> std::io::Result<()> {
         std::fs::remove_file(path)?
     }
     Ok(())
+}
+pub fn rand_str(length: usize) -> String {
+    // Define the characters to choose from (including special characters and emojis)
+    let chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ~=+%^*/()[]{}/!@#$?|©®😁😭🉑️🐂㎡我爱吃鱼";
+    
+    // Convert the string into a slice of chars for random selection
+    let mut rng = rand::thread_rng();
+    
+    // Generate the random string by selecting random characters
+    let result: String = (0..length)
+        .map(|_| {
+            let random_char = chars.chars().choose(&mut rng).unwrap(); // Choose a random character
+            random_char
+        })
+        .collect();
+    
+    result
 }

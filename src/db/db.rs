@@ -35,7 +35,7 @@ impl DB {
         // check if memtable is full
 
         if let Some(mem_table) = &self.mem_table {
-            if mem_table.size() + key.len() + val.len() > self.opt.memtable_size as usize {
+            if mem_table.size() + key.len() + val.len() + 5 + 5 > self.opt.memtable_size as usize {
                 self.immu_mem_tables.push(self.mem_table.take().unwrap());
                 self.mem_table = Some(MemTable::new(self.opt.clone()).map_err(|e| e.to_string())?);
             }
@@ -168,6 +168,5 @@ mod tests {
         }
 
         loop {}
-
     }
 }

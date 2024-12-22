@@ -13,9 +13,9 @@ pub struct MemTable {
 
 impl MemTable {
     pub fn new(opt: Arc<Options>) -> std::io::Result<Self> {
-        let fid = opt
-            .max_fid
+        opt.max_fid
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let fid = opt.max_fid.load(std::sync::atomic::Ordering::Relaxed);
         let file_opt = file::Options {
             file_name: file_wal_name(fid),
             dir: opt.work_dir.clone(),
@@ -68,12 +68,9 @@ impl MemTable {
         self.wal.id()
     }
 
-
     fn replay(&mut self) {
         for (key, val) in &mut self.wal {
             self.skiplist.insert(key, val);
         }
     }
 }
-
-

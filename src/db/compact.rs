@@ -346,6 +346,13 @@ impl LevelManager {
         let mut skr = cd.this_range.clone();
         skr.extend(cd.next_range.clone());
 
+        if cd.this_level == cd.next_level {
+            cd.splits.push(skr);
+            return;
+        }
+
+        let right_bound = skr.right.clone();
+
         let mut add_range = |right: &Slice| {
             skr.right = right.clone();
             cd.splits.push(skr.clone());
@@ -357,13 +364,17 @@ impl LevelManager {
             // last entry in bottom table
             if idx == tables.len() - 1 {
                 add_range(table.max_key());
-                return;
+                if table.max_key().cmp(&right_bound).is_eq() {
+                    return;
+                }
             }
             if idx as u32 % width == width - 1 {
                 // set max key is right interval
                 add_range(table.max_key())
             }
         }
+
+        add_range(&right_bound);
     }
 
     pub async fn run_compacter(&self, id: u32) {
@@ -444,14 +455,12 @@ impl LevelManager {
 
     async fn run_compact_def(&self, id: u32, cd: &mut CompactDef) -> Result<(), String> {
         //debug !
-        println!("{:?}", cd);
+        println!("run compact def start {:?}\n\n\n", cd);
 
         let this_level = cd.this_level;
         let next_level = cd.next_level;
 
-        if this_level != next_level {
-            self.add_splits(cd);
-        }
+        self.add_splits(cd);
 
         let new_tables = self.compact_build_tables(cd).await;
 
@@ -463,8 +472,11 @@ impl LevelManager {
 
         let new_tables_id: Vec<u64> = new_tables.iter().map(|table| table.id().unwrap()).collect();
 
-        self.replace_level_tables(cd.next_level, &cd.bot, new_tables);
-        self.delete_level_tables(cd.this_level, &cd.bot);
+        //debug !
+        println!("run compact def before delete {:?}", cd);
+
+        self.replace_level_tables(cd.next_level, cd.bot.clone(), new_tables);
+        self.delete_level_tables(cd.this_level, cd.top.clone());
 
         println!(
             "create new tables \n : {:?}\n delete tables :{:?}",
@@ -521,13 +533,26 @@ impl LevelManager {
         let mut merge_iter = MergeIterator::new(v);
         let mut last_key = Slice::new();
         let mut add_keys = |iter: &mut MergeIterator, builder: &mut TableBuilder| -> bool {
-            let mut table_kr = KeyRange::new();
-            for (key, val) in iter {
+            //let mut table_kr = KeyRange::new();
+            while let Some((key, val)) = iter.next() {
                 if key.cmp(&last_key) != Ordering::Equal {
                     if val.is_empty() {
                         last_key = key.clone();
                         continue;
                     }
+
+                    // set tmp key to last_key
+                    last_key = key.clone();
+
+                    // // if left boundary is left, give tmp key to left boundary
+                    // if table_kr.left.is_empty() {
+                    //     table_kr.left = key.clone();
+                    // }
+
+                    // // update right boundary
+                    // table_kr.right = last_key.clone();
+
+                    builder.add(&key, &val);
 
                     // key range in iter greater or equal than tmp kr, break
                     if !kr.right.is_empty() && key.cmp(&kr.right).is_ge() {
@@ -536,17 +561,6 @@ impl LevelManager {
                     if builder.reach_capacity() {
                         return false;
                     }
-
-                    // set tmp key to last_key
-                    last_key = key.clone();
-
-                    // if left boundary is left, give tmp key to left boundary
-                    if table_kr.left.is_empty() {
-                        table_kr.left = key.clone();
-                    }
-
-                    // update right boundary
-                    table_kr.right = last_key.clone();
                 }
             }
             true
@@ -573,15 +587,18 @@ impl LevelManager {
 
     // a corountine to help build table
     async fn build_table(opt: Arc<Options>, table_builder: TableBuilder, tx: mpsc::Sender<Table>) {
-        let new_id = opt
-            .max_fid
+        opt.max_fid
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        let new_id = opt.max_fid.load(std::sync::atomic::Ordering::Relaxed);
 
         let sst_name = file_helper::file_sstable_name(new_id);
 
         let table = Table::open(opt.clone(), sst_name, Some(table_builder)).unwrap();
 
-        tx.send(table).await;
+        println!("table id is {}", table.id().unwrap());
+
+        tx.send(table).await.unwrap();
     }
 
     // build changeset
