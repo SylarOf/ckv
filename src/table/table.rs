@@ -3,6 +3,7 @@ use crate::db::options::Options;
 use crate::file::file;
 use crate::file::sstable::SSTable;
 use crate::table::table_builder::{BlockIterator, TableBuilder};
+use crate::utils::filter::Filter;
 use crate::utils::slice::Slice;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
@@ -74,6 +75,16 @@ impl Table {
         }
     }
 
+    // to filter a key search if filter exists
+    pub fn filter_my_contain_key(&self, key: &[u8]) -> bool {
+        let filter = Filter::with_filter(&self.sstable.indexs().bloom_filter);
+        if self.sstable.has_bloom_filter() {
+            filter.may_contain_key(key)
+        } else {
+            true
+        }
+    }
+
     pub fn id(&self) -> Result<u64, String> {
         self.sstable.id()
     }
@@ -129,6 +140,9 @@ impl<'a> TableIterator<'a> {
     }
 
     pub fn seek(&mut self, key: &[u8]) -> Option<&Slice> {
+        if self.table.filter_my_contain_key(key) == false {
+            return None;
+        }
         let block_idx = self.table.sstable.seek(key)?;
         self.set_block(block_idx)?;
         self.bi.seek(key)

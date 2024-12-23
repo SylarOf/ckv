@@ -3,6 +3,7 @@ use crate::utils::slice::Slice;
 use crate::pb::pb::{BlockOffset, TableIndex};
 use crate::file::sstable::SSTable;
 use crate::file;
+use crate::utils::filter::Filter;
 use prost::Message;
 use std::sync::Arc;
 pub struct TableBuilder {
@@ -93,7 +94,7 @@ impl TableBuilder {
             self.finish_block();
             self.cur_block = Block::new(self.opt.clone())
         }
-        self.key_hashs.push(crate::utils::filter_outer::Filter::hash(&key));
+        self.key_hashs.push(Filter::hash(&key));
 
         let mut diffkey;
 
@@ -217,8 +218,8 @@ impl TableBuilder {
         bd.blocks = self.blocks.clone();
         if self.opt.bloom_false_positive > 0.0{
 
-            let bits = crate::utils::filter_outer::Filter::bloom_bits_per_key(self.key_hashs.len() as i32, self.opt.bloom_false_positive);
-            f = crate::utils::filter_outer::Filter::with_keys(&self.key_hashs, bits).get();
+            let bits = Filter::bloom_bits_per_key(self.key_hashs.len() as i32, self.opt.bloom_false_positive);
+            f = Filter::with_keys(&self.key_hashs, bits).get();
         }
         else {f = Vec::new();}
         let (index, data_size) = self.build_index(f);

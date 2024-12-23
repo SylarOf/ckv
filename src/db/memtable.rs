@@ -8,7 +8,6 @@ use std::sync::Arc;
 pub struct MemTable {
     pub(crate) skiplist: SkipMap<Slice, Slice>,
     wal: WalFile,
-    opt: Arc<Options>,
 }
 
 impl MemTable {
@@ -27,7 +26,6 @@ impl MemTable {
         Ok(MemTable {
             skiplist: SkipMap::new(),
             wal,
-            opt,
         })
     }
 
@@ -42,7 +40,6 @@ impl MemTable {
         let mut memtable = MemTable {
             skiplist: SkipMap::new(),
             wal,
-            opt,
         };
         memtable.replay();
         Ok(memtable)

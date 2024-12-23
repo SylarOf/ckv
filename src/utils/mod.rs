@@ -1,8 +1,6 @@
 pub mod encodings;
-mod filter;
-mod filter_cargo;
+pub mod filter;
 //mod filter_outer;
 pub mod slice;
 pub mod file;
-pub mod filter_outer;
 pub mod test_helper;
