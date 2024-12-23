@@ -1,4 +1,4 @@
-ckv is a simple kv engine use rust
+ckv is a simple kv engine uses rust
 
 base data structures:
 
